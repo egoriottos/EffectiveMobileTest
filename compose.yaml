@@ -1,0 +1,10 @@
+services:
+  postgres:
+    container_name: "effectiveMobile"
+    image: 'postgres:latest'
+    environment:
+      - 'POSTGRES_DB=taskDB'
+      - 'POSTGRES_PASSWORD=12345'
+      - 'POSTGRES_USER=user'
+    ports:
+      - '5432:5432'
