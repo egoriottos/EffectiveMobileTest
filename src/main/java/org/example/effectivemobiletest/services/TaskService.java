@@ -34,7 +34,6 @@ public class TaskService {
     private final UserRepository userRepository;
     private final ModelMapper modelMapper;
 
-    //создание задачи аунтефицированным пользователем
     public TaskResponse createTask(CreateTaskCommand createTaskCommand) {
         Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         String username;
@@ -70,134 +69,119 @@ public class TaskService {
         return modelMapper.map(task, TaskResponse.class);
     }
 
-    //Админ создает Таски и может сам назначить автора и исполнителя
-    public TaskResponse createTaskByAdmin(CreateTaskCommand createTaskCommand) {
-        User performer = null;
-        if (createTaskCommand.getPerformerUserName() != null) {
-            performer = userRepository.findByEmail(createTaskCommand.getPerformerUserName())
-                    .orElseThrow(() -> new UsernameNotFoundException("Performer not found " + createTaskCommand.getPerformerUserName()));
-        }
-        var task = Task.builder()
-                .title(createTaskCommand.getTitle())
-                .description(createTaskCommand.getDescription())
-                .author(createTaskCommand.getAuthor())
-                .status(TaskStatus.PENDING)
-                .priority(createTaskCommand.getPriority())
-                .performer(performer)
-                .comments(Collections.singletonList(createTaskCommand.getComments()))
-                .createdAt(LocalDateTime.now())
-                .build();
-        taskRepository.save(task);
-        return modelMapper.map(task, TaskResponse.class);
+    public List<Task> getTasks(Pageable paging) {
+        Page<Task> tasks = taskRepository.findAll(paging);
+        return tasks.getContent();
     }
 
-    //список задач с пагинацией
-    public Page<TaskResponse> getTasks(Integer offset, Integer limit) {
-        Pageable nextPage = PageRequest.of(offset, limit);
+    public List<Task> getTaskByAuthor(String email, Pageable paging) {
+        User author = userRepository.findByEmail(email).orElseThrow(() -> new UsernameNotFoundException("User not found " + email));
+        Page<Task> pagedTasks = taskRepository.findByAuthor(author, paging);
 
-        return modelMapper.map(taskRepository.findAll(nextPage), Page.class);
+        return pagedTasks.getContent();
     }
 
-    //список задач по автору
-    public List<Task> getTaskByAuthor(String email, Integer offset, Integer limit) {
-        Pageable nextPage = PageRequest.of(offset, limit);
-        User author = userRepository.findByEmail(email).orElseThrow(()-> new UsernameNotFoundException("User not found " + email));
-        return taskRepository.findByAuthor(author, nextPage);
+    public List<Task> getTaskByPerformer(String email, Pageable paging) {
+        User performer = userRepository.findByEmail(email).orElseThrow(() -> new UsernameNotFoundException("User not found " + email));
+        Page<Task> pagedTasks = taskRepository.findByPerformer(performer, paging);
+        return pagedTasks.getContent();
     }
 
-    //список задач по исплнителю
-    public List<Task> getTaskByPerformer(String username, Integer offset, Integer limit) {
-        Pageable nextPage = PageRequest.of(offset, limit);
-        return taskRepository.findByPerformerUsername(username, nextPage);
-    }
-
-    //обновление задачи
     @Transactional
-    public void updateTask(Long id, UpdateTaskCommand updateTaskCommand) throws AccessDeniedException {
-        var taskForUpdate = taskRepository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("Task not found for id: " + id));
-        User currentUser = getCurrentAuthenticatedUser();
-        if (!taskForUpdate.getAuthor().equals(currentUser)) {
-            throw new AccessDeniedException("You do not have permission to update this task");
+    public void updateTask(Long id, UpdateTaskCommand taskDto) throws AccessDeniedException {
+
+        Task existingTask = taskRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Task with ID " + id + " not found"));
+
+
+        User currentUser = getCurrentAuthenticatedUsers();
+        if (!existingTask.getAuthor().equals(currentUser)) {
+            throw new AccessDeniedException("You are not authorized to update this task");
         }
-        if (!taskForUpdate.getTitle().equals(updateTaskCommand.getTitle())
-                || !taskForUpdate.getDescription().equals(updateTaskCommand.getDescription())
-                || !taskForUpdate.getStatus().equals(updateTaskCommand.getStatus())
-                || !taskForUpdate.getPriority().equals(updateTaskCommand.getPriority())
-                || !taskForUpdate.getPerformer().equals(updateTaskCommand.getPerformer())
-                || !taskForUpdate.getComments().equals(updateTaskCommand.getComments())
-        ) {
-            taskForUpdate.setTitle(updateTaskCommand.getTitle());
-            taskForUpdate.setDescription(updateTaskCommand.getDescription());
-            taskForUpdate.setStatus(updateTaskCommand.getStatus());
-            taskForUpdate.setPriority(updateTaskCommand.getPriority());
-            taskForUpdate.setPerformer(updateTaskCommand.getPerformer());
-            taskForUpdate.setComments(updateTaskCommand.getComments());
-            taskForUpdate.setUpdatedAt(LocalDateTime.now());
-            taskRepository.save(taskForUpdate);
-        }
+
+        User performer = userRepository.findByEmail(taskDto.getPerformer().getEmail()).orElseThrow(() -> new EntityNotFoundException("Entity not found"));
+
+        existingTask.setTitle(taskDto.getTitle());
+        existingTask.setDescription(taskDto.getDescription());
+        existingTask.setComments(taskDto.getComments());
+        existingTask.setStatus(taskDto.getStatus());
+        existingTask.setPriority(taskDto.getPriority());
+        existingTask.setPerformer(performer); // Установить существующего пользователя
+
+        taskRepository.save(existingTask);
     }
 
-    //удаляем задачу
     @Transactional
     public void deleteTask(Long id) throws AccessDeniedException {
+
         var taskForDelete = taskRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Task not found for id: " + id));
-        var currentUser = getCurrentAuthenticatedUser();
+        var currentUser = getCurrentAuthenticatedUsers();
         if (!taskForDelete.getAuthor().equals(currentUser)) {
             throw new AccessDeniedException("You do not have permission to delete this task");
         }
         taskRepository.delete(taskForDelete);
     }
 
-    //меняем статус задачи
     @Transactional
     public void changeTaskStatus(Long id, TaskStatus taskStatus) throws AccessDeniedException {
-        var taskForUpdate = taskRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("Task not found for id: " + id));
-        var currentPerformer = getCurrentAuthenticatedUser();
+        var taskForUpdate = taskRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Task not found for id: " + id));
+
+        var currentPerformer = getCurrentAuthenticatedUsers();
+
         if (!taskForUpdate.getPerformer().equals(currentPerformer)) {
             throw new AccessDeniedException("You do not have permission to update this task");
         }
-        taskForUpdate.setStatus(taskStatus);
-        taskRepository.save(taskForUpdate);
 
+        taskForUpdate.setStatus(taskStatus);
+
+        taskRepository.save(taskForUpdate);
     }
 
-    //добавление комментариев
     @Transactional
     public void addComment(Long id, List<String> comment) throws AccessDeniedException {
         var taskForUpdate = taskRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Task not found for id: " + id));
-        var currentPerformer = getCurrentAuthenticatedUser();
-        if (!taskForUpdate.getPerformer().equals(currentPerformer)
-                || !taskForUpdate.getAuthor().equals(currentPerformer)) {
+
+        var currentPerformer = getCurrentAuthenticatedUsers();
+
+        if (currentPerformer != null &&
+                (taskForUpdate.getPerformer() != null && taskForUpdate.getPerformer().equals(currentPerformer) ||
+                        taskForUpdate.getAuthor() != null && taskForUpdate.getAuthor().equals(currentPerformer))) {
+
+            taskForUpdate.setComments(comment);
+            taskRepository.save(taskForUpdate);
+        } else {
             throw new AccessDeniedException("You do not have permission to update this task");
         }
-        taskForUpdate.setComments(comment);
-        taskRepository.save(taskForUpdate);
     }
 
-    //добавления исполнителя
     @Transactional
     public void addPerformer(Long id, User performer) throws AccessDeniedException {
         var taskForUpdate = taskRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Task not found for id: " + id));
-        var currentAuthor = getCurrentAuthenticatedUser();
-        if (!taskForUpdate.getAuthor().equals(currentAuthor)) {
+
+        var currentUser = getCurrentAuthenticatedUsers();
+
+        if (taskForUpdate.getAuthor().equals(currentUser)) {
+            var existingPerformer = userRepository.findById(performer.getId())
+                    .orElseThrow(() -> new EntityNotFoundException("User not found for id: " + performer.getId()));
+
+            taskForUpdate.setPerformer(existingPerformer);
+            taskRepository.save(taskForUpdate);
+        } else {
             throw new AccessDeniedException("You do not have permission to update this task");
         }
-        taskForUpdate.setPerformer(performer);
-        taskRepository.save(taskForUpdate);
     }
 
-    //метод чтобы пользователь мог только свои задачи менять если автор и статус если исполнитель
-    private User getCurrentAuthenticatedUser() throws AccessDeniedException {
+    public User getCurrentAuthenticatedUsers() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null && !authentication.isAuthenticated()) {
-            throw new AccessDeniedException("You must be authenticated");
+        if (authentication != null && authentication.getPrincipal() instanceof UserDetails) {
+            String username = ((UserDetails) authentication.getPrincipal()).getUsername();
+            return userRepository.findByEmail(username)
+                    .orElseThrow(() -> new EntityNotFoundException("User with email " + username + " not found"));
         }
-        String email = authentication.getPrincipal().toString();
-        return userRepository.findByEmail(email).orElseThrow(() -> new EntityNotFoundException("User not found " + email));
+        throw new RuntimeException("No authenticated user found");
     }
-
 }

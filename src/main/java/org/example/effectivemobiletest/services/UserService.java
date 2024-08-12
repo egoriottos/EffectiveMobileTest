@@ -24,7 +24,6 @@ public class UserService {
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
 
-    //Создание юзера и выдача токена
     @Transactional
     public AuthenticationResponse createUser(CreateUserCommand createUserCommand) {
         var user = User.builder()
@@ -41,7 +40,6 @@ public class UserService {
                 .build();
     }
 
-    //создание админа
     public AuthenticationResponse createAdmin(CreateUserCommand createUserCommand) {
         var user = User.builder()
                 .userName(createUserCommand.getUserName())
@@ -57,7 +55,6 @@ public class UserService {
                 .build();
     }
 
-    //аунтефикация пользователя
     public AuthenticationResponse authenticate(AuthenticationRequest authenticationRequest) {
         authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(authenticationRequest.getEmail(), authenticationRequest.getPassword()));
         var user = userRepository.findByEmail(authenticationRequest.getEmail())
